@@ -120,24 +120,34 @@ async function callGemini(prompt) {
     console.error("Then run: export GEMINI_API_KEY=...");
     process.exit(1);
   }
-  const model = "gemini-2.5-flash"; // fast, generous free-tier quota (1,500 req/day)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-    }),
-  });
+  // Google renames/retires Gemini model IDs fairly often. Try a short list of
+  // known-good free-tier models in order, falling through on 404s so a single
+  // retired name doesn't break the whole script.
+  const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash"];
 
-  if (!res.ok) {
+  let lastError;
+  for (const model of modelsToTry) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") ?? "";
+    }
+
     const errBody = await res.text();
-    throw new Error(`Gemini API error (${res.status}): ${errBody}`);
+    lastError = new Error(`Gemini API error on model "${model}" (${res.status}): ${errBody}`);
+    if (res.status !== 404) break; // only fall through on "model not found", not on real errors (e.g. bad key, quota)
   }
 
-  const data = await res.json();
-  return data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") ?? "";
+  throw lastError;
 }
 
 async function main() {
