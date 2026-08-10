@@ -14,11 +14,14 @@
  *   node generate.js --provider anthropic   # use Claude instead of the free default
  *
  * PROVIDERS
- *   github     (default, FREE) -> GitHub Models API, no credit card required.
- *              Requires: export GITHUB_TOKEN=ghp_...  (a PAT with "models: read" permission,
- *              created at https://github.com/settings/personal-access-tokens)
+ *   gemini     (default, FREE) -> Google Gemini API via Google AI Studio, no credit card
+ *              required, no expiration on the free tier.
+ *              Requires: export GEMINI_API_KEY=...  (get one at https://aistudio.google.com/apikey)
  *   anthropic  -> Claude API (paid, requires credits in console.anthropic.com)
  *              Requires: export ANTHROPIC_API_KEY=sk-ant-...
+ *
+ *   NOTE: GitHub Models (the previous free default) was permanently retired by
+ *   GitHub on July 30, 2026. It has been removed from this script.
  *
  * MODES
  *   changelog  -> user-facing release notes grouped by feature/fix/chore (default)
@@ -29,11 +32,10 @@
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
 
 // ---------- CLI args ----------
 function parseArgs(argv) {
-  const args = { from: null, to: "HEAD", mode: "changelog", out: null, count: 20, provider: "github" };
+  const args = { from: null, to: "HEAD", mode: "changelog", out: null, count: 20, provider: "gemini" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--from") args.from = argv[++i];
@@ -110,25 +112,32 @@ async function callAnthropic(prompt) {
     .join("\n");
 }
 
-async function callGitHubModels(prompt) {
-  if (!process.env.GITHUB_TOKEN) {
-    console.error("Error: GITHUB_TOKEN environment variable is not set.");
-    console.error("Create a free PAT (with 'models: read' permission) at:");
-    console.error("  https://github.com/settings/personal-access-tokens");
-    console.error("Then run: export GITHUB_TOKEN=ghp_...");
+async function callGemini(prompt) {
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("Error: GEMINI_API_KEY environment variable is not set.");
+    console.error("Get a free key (no credit card) at:");
+    console.error("  https://aistudio.google.com/apikey");
+    console.error("Then run: export GEMINI_API_KEY=...");
     process.exit(1);
   }
-  // GitHub Models exposes an OpenAI-compatible endpoint — free, no credit card.
-  const client = new OpenAI({
-    baseURL: "https://models.github.ai/inference",
-    apiKey: process.env.GITHUB_TOKEN,
+  const model = "gemini-2.5-flash"; // fast, generous free-tier quota (1,500 req/day)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+    }),
   });
-  const response = await client.chat.completions.create({
-    model: "openai/gpt-4o-mini", // small + fast; well within the free daily quota
-    max_tokens: 1500,
-    messages: [{ role: "user", content: prompt }],
-  });
-  return response.choices[0]?.message?.content ?? "";
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini API error (${res.status}): ${errBody}`);
+  }
+
+  const data = await res.json();
+  return data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") ?? "";
 }
 
 async function main() {
@@ -145,7 +154,7 @@ async function main() {
   const prompt = buildPrompt(args.mode, log, diffStat);
 
   console.log(`Calling ${args.provider} to generate "${args.mode}" output...`);
-  const text = args.provider === "anthropic" ? await callAnthropic(prompt) : await callGitHubModels(prompt);
+  const text = args.provider === "anthropic" ? await callAnthropic(prompt) : await callGemini(prompt);
 
   console.log("\n--------- GENERATED OUTPUT ---------\n");
   console.log(text);
