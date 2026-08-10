@@ -1,0 +1,17 @@
+{
+  "name": "ai-changelog-gen",
+  "version": "1.0.0",
+  "description": "Generates changelog / release notes / PR descriptions from git history using the Claude API or the free GitHub Models API",
+  "type": "module",
+  "main": "generate.js",
+  "bin": {
+    "ai-changelog": "./generate.js"
+  },
+  "scripts": {
+    "generate": "node generate.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "openai": "^7.4.0"
+  }
+}
